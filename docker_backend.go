@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -52,73 +53,81 @@ type dockerClient interface {
 }
 
 func (d *DockerBackend) Run(job *host.Job) error {
-	g := grohl.NewContext(grohl.Data{"backend": "docker", "fn": "run_job", "job.id": job.ID})
-	g.Log(grohl.Data{"at": "start", "job.image": job.Config.Image, "job.cmd": job.Config.Cmd, "job.entrypoint": job.Config.Entrypoint})
+	g := grohl.NewContext(grohl.Data{"backend": "docker", "fn": "run", "job.id": job.ID})
+	g.Log(grohl.Data{"at": "start", "job.artifact.url": job.Artifact.URI, "job.cmd": job.Config.Cmd})
 
-	if job.HostConfig == nil {
-		job.HostConfig = &docker.HostConfig{
-			PortBindings: make(map[string][]docker.PortBinding, job.TCPPorts),
-		}
+	config := &docker.Config{
+		// Image:
+		Entrypoint:   job.Config.Entrypoint,
+		Cmd:          job.Config.Cmd,
+		Tty:          job.Config.TTY,
+		AttachStdout: true,
+		AttachStderr: true,
+		AttachStdin:  job.Config.Stdin,
+		StdinOnce:    job.Config.Stdin,
+		ExposedPorts: make(map[string]struct{}, len(job.Config.Ports)),
 	}
-	if job.Config.ExposedPorts == nil {
-		job.Config.ExposedPorts = make(map[string]struct{}, job.TCPPorts)
+	hostConfig := &docker.HostConfig{
+		PortBindings: make(map[string][]docker.PortBinding, len(job.Config.Ports)),
 	}
-	for i := 0; i < job.TCPPorts; i++ {
-		p, err := d.ports.Get()
-		if err != nil {
-			return err
+	config.Env = make([]string, 0, len(job.Config.Env)+len(job.Config.Ports)+1)
+	for k, v := range job.Config.Env {
+		config.Env = append(config.Env, k+"="+v)
+	}
+
+	for i, p := range job.Config.Ports {
+		if p.Port == 0 {
+			port, err := d.ports.Get()
+			if err != nil {
+				return err
+			}
+			p.Port = int(port)
 		}
-		port := strconv.Itoa(int(p))
+		port := strconv.Itoa(p.Port)
 
 		if i == 0 {
-			job.Config.Env = append(job.Config.Env, "PORT="+port)
+			config.Env = append(config.Env, "PORT="+port)
 		}
-		job.Config.Env = append(job.Config.Env, fmt.Sprintf("PORT_%d=%s", i, port))
-		job.Config.ExposedPorts[port+"/tcp"] = struct{}{}
-		job.HostConfig.PortBindings[port+"/tcp"] = []docker.PortBinding{{HostPort: port, HostIp: d.bindAddr}}
+		config.Env = append(config.Env, fmt.Sprintf("PORT_%d=%s", i, port))
+		config.ExposedPorts[port+"/"+p.Proto] = struct{}{}
+		hostConfig.PortBindings[port+"/"+p.Proto] = []docker.PortBinding{{HostPort: port, HostIp: d.bindAddr}}
 	}
 
-	job.Config.AttachStdout = true
-	job.Config.AttachStderr = true
 	if strings.HasPrefix(job.ID, "flynn-") {
-		job.Config.Name = job.ID
+		config.Name = job.ID
 	} else {
-		job.Config.Name = "flynn-" + job.ID
+		config.Name = "flynn-" + job.ID
 	}
 
 	d.state.AddJob(job)
 	g.Log(grohl.Data{"at": "create_container"})
-	container, err := d.docker.CreateContainer(job.Config)
+	container, err := d.docker.CreateContainer(config)
 	if err == docker.ErrNoSuchImage {
 		g.Log(grohl.Data{"at": "pull_image"})
-		err = d.docker.PullImage(docker.PullImageOptions{Repository: job.Config.Image}, os.Stdout)
+		err = d.docker.PullImage(docker.PullImageOptions{Repository: config.Image}, os.Stdout)
 		if err != nil {
 			g.Log(grohl.Data{"at": "pull_image", "status": "error", "err": err})
-			d.state.SetStatusFailed(job.ID, err)
 			return err
 		}
-		container, err = d.docker.CreateContainer(job.Config)
+		container, err = d.docker.CreateContainer(config)
 	}
 	if err != nil {
 		g.Log(grohl.Data{"at": "create_container", "status": "error", "err": err})
-		d.state.SetStatusFailed(job.ID, err)
 		return err
 	}
 	d.state.SetContainerID(job.ID, container.ID)
 	d.state.WaitAttach(job.ID)
 	g.Log(grohl.Data{"at": "start_container"})
-	if err := d.docker.StartContainer(container.ID, job.HostConfig); err != nil {
+	if err := d.docker.StartContainer(container.ID, hostConfig); err != nil {
 		g.Log(grohl.Data{"at": "start_container", "status": "error", "err": err})
-		d.state.SetStatusFailed(job.ID, err)
 		return err
 	}
 	container, err = d.docker.InspectContainer(container.ID)
 	if err != nil {
 		g.Log(grohl.Data{"at": "inspect_container", "status": "error", "err": err})
-		d.state.SetStatusFailed(job.ID, err)
 		return err
 	}
-	d.state.SetStatusRunning(job.ID)
+	d.state.SetInternalIP(job.ID, container.NetworkSettings.IPAddress)
 	g.Log(grohl.Data{"at": "finish"})
 	return nil
 }
@@ -126,6 +135,10 @@ func (d *DockerBackend) Run(job *host.Job) error {
 func (d *DockerBackend) Stop(id string) error {
 	const stopTimeout = 1
 	return d.docker.StopContainer(id, stopTimeout)
+}
+
+func (d *DockerBackend) RestoreState(jobs map[string]*host.ActiveJob, dec *json.Decoder) error {
+	return nil
 }
 
 func (d *DockerBackend) Attach(req *AttachRequest) error {
@@ -148,7 +161,7 @@ func (d *DockerBackend) Attach(req *AttachRequest) error {
 		}
 	}
 
-	if req.Job.Job.Config.Tty && opts.Stdin {
+	if req.Job.Job.Config.TTY && opts.Stdin {
 		resize := func() { d.docker.ResizeContainerTTY(req.Job.ContainerID, req.Height, req.Width) }
 		if req.Job.Status == host.StatusRunning {
 			resize()
@@ -202,7 +215,7 @@ func (d *DockerBackend) handleEvents() {
 			continue
 		}
 		// TODO: return ports to pool
-		d.state.SetStatusDone(event.ID, container.State.ExitCode)
+		d.state.SetContainerStatusDone(event.ID, container.State.ExitCode)
 	}
 }
 

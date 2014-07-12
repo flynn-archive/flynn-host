@@ -47,6 +47,7 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 			return
 		}
 		// TODO: add timeout
+		g.Log(grohl.Data{"at": "wait"})
 		<-attachWait
 		job = h.state.GetJob(req.JobID)
 	}
@@ -76,12 +77,15 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 	go func() {
 		select {
 		case <-success:
+			g.Log(grohl.Data{"at": "success"})
 			conn.Write([]byte{host.AttachSuccess})
 			close(success)
 		case <-failed:
+			g.Log(grohl.Data{"at": "failed"})
 		}
 		close(attachWait)
 	}()
+	g.Log(grohl.Data{"at": "attach"})
 	if err := h.backend.Attach(opts); err != nil {
 		select {
 		case <-success:
@@ -89,7 +93,7 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 			close(failed)
 			conn.Write(append([]byte{host.AttachError}, err.Error()...))
 		}
-		g.Log(grohl.Data{"status": "error", "err": err})
+		g.Log(grohl.Data{"at": "attach", "status": "error", "err": err.Error()})
 		return
 	}
 	g.Log(grohl.Data{"at": "finish"})

@@ -2,3 +2,4 @@
 .vagrant
 flynn-host
 *.test
+flynn-init/flynn-init

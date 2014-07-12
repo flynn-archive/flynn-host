@@ -3,13 +3,43 @@
 	"GoVersion": "go1.3",
 	"Deps": [
 		{
+			"ImportPath": "github.com/alexzorin/libvirt-go",
+			"Comment": "v2.6.0-2-g99d0178",
+			"Rev": "99d0178daa068fd3a437c218c559e3d3bee4228b"
+		},
+		{
 			"ImportPath": "github.com/coreos/go-etcd/etcd",
-			"Comment": "v0.2.0-rc1-98-gd88f477",
-			"Rev": "d88f477a542c781eb9ad18ce82b3a0b9b6e2d07e"
+			"Comment": "v0.2.0-rc1-114-g7745cfd",
+			"Rev": "7745cfd7f8e619cc9e6be450238e6253a57a227f"
+		},
+		{
+			"ImportPath": "github.com/docker/libcontainer/netlink",
+			"Comment": "v1.0.0-55-g17ce8d8",
+			"Rev": "17ce8d8519f0ecccb6e6b960ea3eec1fc640ea20"
+		},
+		{
+			"ImportPath": "github.com/dotcloud/docker/daemon/networkdriver",
+			"Comment": "v1.1.0-14-g02ef943",
+			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
+		},
+		{
+			"ImportPath": "github.com/dotcloud/docker/pkg/signal",
+			"Comment": "v1.1.0-14-g02ef943",
+			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
+		},
+		{
+			"ImportPath": "github.com/dotcloud/docker/pkg/term",
+			"Comment": "v1.1.0-14-g02ef943",
+			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
+		},
+		{
+			"ImportPath": "github.com/dotcloud/docker/pkg/user",
+			"Comment": "v1.1.0-14-g02ef943",
+			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
 		},
 		{
 			"ImportPath": "github.com/flynn/discoverd/agent",
-			"Rev": "98fbb6a0c29a087c055734e539690d8176d14517"
+			"Rev": "d553fada2899d48e3f5bd08d896d7fee37515d55"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-discoverd",
@@ -21,19 +51,49 @@
 		},
 		{
 			"ImportPath": "github.com/flynn/go-flynn/attempt",
-			"Rev": "c88823a638e8dc828d6623252f9132262a71e791"
+			"Rev": "f6d10e4624ad4cb546c93863625a242ce64dac61"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-flynn/cluster",
-			"Rev": "c88823a638e8dc828d6623252f9132262a71e791"
+			"Rev": "f6d10e4624ad4cb546c93863625a242ce64dac61"
+		},
+		{
+			"ImportPath": "github.com/flynn/go-iptables",
+			"Rev": "0fb52dff8c73567bb67d61de2e67937f7edbe7b0"
+		},
+		{
+			"ImportPath": "github.com/flynn/lumberjack",
+			"Comment": "v1.0-3-g9aa176d",
+			"Rev": "9aa176d4f85b32711f2a527a694ba8ba5629fb33"
 		},
 		{
 			"ImportPath": "github.com/flynn/rpcplus",
 			"Rev": "cd680b2cd620be36cd39a58270c6a2894dd2e810"
 		},
 		{
+			"ImportPath": "github.com/j-keck/arping",
+			"Rev": "7aa611681473b9c5af382b96b6aa1df0b89f5c97"
+		},
+		{
+			"ImportPath": "github.com/kr/pty",
+			"Comment": "release.r56-11-gc46bdbf",
+			"Rev": "c46bdbf4af2e43e5f163092037ec27e9e9aee1f3"
+		},
+		{
+			"ImportPath": "github.com/syndtr/gocapability/capability",
+			"Rev": "3c85049eaeb429febe7788d9c7aac42322a377fe"
+		},
+		{
 			"ImportPath": "github.com/technoweenie/grohl",
 			"Rev": "91868e10032390c992d419d10b17cc8bfdc35808"
+		},
+		{
+			"ImportPath": "github.com/titanous/fdrpc",
+			"Rev": "487d72e8466e6babf78166d735a63c8d808060dc"
+		},
+		{
+			"ImportPath": "github.com/tysontate/gommap",
+			"Rev": "e87a6e482c2ceaa54bd76e0fb30d1f2d40dd3f01"
 		}
 	]
 }

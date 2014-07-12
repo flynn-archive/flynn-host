@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net"
 	"net/http"
 
 	"github.com/flynn/flynn-host/types"
@@ -9,11 +10,20 @@ import (
 	rpc "github.com/flynn/rpcplus/comborpc"
 )
 
-func serveHTTP(host *Host, attach *attachHandler) {
-	rpc.Register(host)
+func serveHTTP(host *Host, attach *attachHandler, sh *shutdownHandler) error {
+	if err := rpc.Register(host); err != nil {
+		return err
+	}
 	rpc.HandleHTTP()
 	http.Handle("/attach", attach)
-	http.ListenAndServe(":1113", nil)
+
+	l, err := net.Listen("tcp", ":1113")
+	if err != nil {
+		return err
+	}
+	sh.BeforeExit(func() { l.Close() })
+	go http.Serve(l, nil)
+	return nil
 }
 
 type Host struct {

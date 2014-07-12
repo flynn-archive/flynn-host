@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 
 	"github.com/flynn/flynn-host/types"
@@ -26,4 +27,9 @@ type Backend interface {
 	Stop(string) error
 	Attach(*AttachRequest) error
 	Cleanup() error
+	RestoreState(map[string]*host.ActiveJob, *json.Decoder) error
+}
+
+type StateSaver interface {
+	SaveState(*json.Encoder) error
 }

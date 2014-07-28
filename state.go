@@ -20,7 +20,7 @@ type State struct {
 	containers map[string]*host.ActiveJob              // container ID -> job
 	listeners  map[string]map[chan host.Event]struct{} // job id -> listener list (ID "all" gets all events)
 	listenMtx  sync.RWMutex
-	attachers  map[string]chan struct{}
+	attachers  map[string]map[chan struct{}]struct{}
 
 	stateFileMtx sync.Mutex
 	stateFile    *os.File
@@ -32,7 +32,7 @@ func NewState() *State {
 		jobs:       make(map[string]*host.ActiveJob),
 		containers: make(map[string]*host.ActiveJob),
 		listeners:  make(map[string]map[chan host.Event]struct{}),
-		attachers:  make(map[string]chan struct{}),
+		attachers:  make(map[string]map[chan struct{}]struct{}),
 	}
 }
 
@@ -191,13 +191,13 @@ func (s *State) SetStatusDone(jobID string, exitCode int) {
 	s.setStatusDone(job, exitCode)
 }
 
-func (s *State) setStatusDone(job *host.ActiveJob, exitCode int) {
+func (s *State) setStatusDone(job *host.ActiveJob, exitStatus int) {
 	if job.Status == host.StatusDone || job.Status == host.StatusCrashed || job.Status == host.StatusFailed {
 		return
 	}
 	job.EndedAt = time.Now().UTC()
-	job.ExitCode = exitCode
-	if exitCode == 0 {
+	job.ExitStatus = exitStatus
+	if exitStatus == 0 {
 		job.Status = host.StatusDone
 	} else {
 		job.Status = host.StatusCrashed
@@ -220,6 +220,7 @@ func (s *State) SetStatusFailed(jobID string, err error) {
 	job.Error = &errStr
 	s.sendEvent(job, "error")
 	go s.persist()
+	go s.WaitAttach(jobID)
 }
 
 func (s *State) AddAttacher(jobID string, ch chan struct{}) *host.ActiveJob {
@@ -229,28 +230,35 @@ func (s *State) AddAttacher(jobID string, ch chan struct{}) *host.ActiveJob {
 		jobCopy := *job
 		return &jobCopy
 	}
-	s.attachers[jobID] = ch
-	// TODO: error if attach already waiting
+	if _, ok := s.attachers[jobID]; !ok {
+		s.attachers[jobID] = make(map[chan struct{}]struct{})
+	}
+	s.attachers[jobID][ch] = struct{}{}
 	return nil
 }
 
 func (s *State) RemoveAttacher(jobID string, ch chan struct{}) {
 	s.mtx.Lock()
-	delete(s.attachers, jobID)
-	s.mtx.Unlock()
+	defer s.mtx.Unlock()
+	if a, ok := s.attachers[jobID]; ok {
+		delete(a, ch)
+		if len(a) == 0 {
+			delete(s.attachers, jobID)
+		}
+	}
 }
 
 func (s *State) WaitAttach(jobID string) {
 	s.mtx.Lock()
-	ch, ok := s.attachers[jobID]
+	a := s.attachers[jobID]
+	delete(s.attachers, jobID)
 	s.mtx.Unlock()
-	if !ok {
-		return
+	for ch := range a {
+		// signal attach
+		ch <- struct{}{}
+		// wait for attach
+		<-ch
 	}
-	// signal attach
-	ch <- struct{}{}
-	// wait for attach
-	<-ch
 }
 
 func (s *State) AddListener(jobID string, ch chan host.Event) {

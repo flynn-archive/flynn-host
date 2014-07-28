@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -38,12 +37,15 @@ func NewLibvirtLXCBackend(state *State, volPath, logPath, initPath string) (Back
 		return nil, err
 	}
 
-	iptables.RemoveExistingChain("FLYNN")
+	iptables.RemoveExistingChain("FLYNN", "virbr0")
 	chain, err := iptables.NewChain("FLYNN", "virbr0")
 	if err != nil {
 		return nil, err
 	}
 	if err := ioutil.WriteFile("/proc/sys/net/ipv4/conf/virbr0/route_localnet", []byte("1"), 0666); err != nil {
+		return nil, err
+	}
+	if err := ioutil.WriteFile("/sys/class/net/virbr0/bridge/stp_state", []byte("0"), 0666); err != nil {
 		return nil, err
 	}
 
@@ -354,6 +356,7 @@ func (l *LibvirtLXCBackend) Run(job *host.Job) (err error) {
 	}
 
 	g.Log(grohl.Data{"at": "define_domain"})
+	fmt.Println(string(domain.XML()))
 	vd, err := l.libvirt.DomainDefineXML(string(domain.XML()))
 	if err != nil {
 		g.Log(grohl.Data{"at": "define_domain", "status": "error", "err": err})
@@ -542,70 +545,98 @@ func (c *libvirtContainer) cleanup() error {
 }
 
 func (l *LibvirtLXCBackend) Stop(id string) error {
-	client := l.getContainer(id)
-	if client == nil {
-		return errors.New("unknown container")
+	g := grohl.NewContext(grohl.Data{"backend": "libvirt-lxc", "fn": "stop", "job.id": id})
+	g.Log(grohl.Data{})
+	client, err := l.getContainer(id)
+	if err != nil {
+		g.Log(grohl.Data{"status": "error", "err": err})
+		return err
 	}
 	// TODO: follow up with sigkill
 	return client.Signal(int(syscall.SIGTERM))
 }
 
-func (l *LibvirtLXCBackend) getContainer(id string) *libvirtContainer {
+func (l *LibvirtLXCBackend) getContainer(id string) (*libvirtContainer, error) {
 	l.containersMtx.RLock()
 	defer l.containersMtx.RUnlock()
-	return l.containers[id]
+	c := l.containers[id]
+	if c == nil {
+		return nil, errors.New("libvirt: unknown container")
+	}
+	return c, nil
 }
 
-func (l *LibvirtLXCBackend) Attach(req *AttachRequest) error {
-	var stdout, stderr, stdin bool
-	for _, s := range req.Streams {
-		switch s {
-		case "stdout":
-			stdout = true
-		case "stderr":
-			stderr = true
-		case "stdin":
-			stdin = true
+func (l *LibvirtLXCBackend) ResizeTTY(id string, height, width uint16) error {
+	container, err := l.getContainer(id)
+	if err != nil {
+		return err
+	}
+	if !container.job.Config.TTY {
+		return errors.New("job doesn't have a TTY")
+	}
+	pty, err := container.GetPtyMaster()
+	if err != nil {
+		return err
+	}
+	return term.SetWinsize(pty.Fd(), &term.Winsize{Height: height, Width: width})
+}
+
+func (l *LibvirtLXCBackend) Signal(id string, sig int) error {
+	container, err := l.getContainer(id)
+	if err != nil {
+		return err
+	}
+	return container.Signal(sig)
+}
+
+func (l *LibvirtLXCBackend) Attach(req *AttachRequest) (err error) {
+	var client *libvirtContainer
+	if req.Stdin != nil || req.Job.Job.Config.TTY {
+		client, err = l.getContainer(req.Job.Job.ID)
+		if err != nil {
+			return err
 		}
 	}
 
-	var client *libvirtContainer
-	if stdin || req.Job.Job.Config.TTY {
-		client = l.getContainer(req.Job.Job.ID)
-		if client == nil {
-			return fmt.Errorf("missing job client (is the job running?)")
+	defer func() {
+		if req.Job.Job.Config.TTY || req.Stream && err == io.EOF {
+			<-client.done
+			job := l.state.GetJob(req.Job.Job.ID)
+			if job.Status == host.StatusDone || job.Status == host.StatusCrashed {
+				err = ExitError(job.ExitStatus)
+			}
 		}
-	}
+	}()
+
 	if req.Job.Job.Config.TTY {
 		pty, err := client.GetPtyMaster()
 		if err != nil {
 			return err
 		}
-		if err := term.SetWinsize(pty.Fd(), &term.Winsize{Height: uint16(req.Height), Width: uint16(req.Width)}); err != nil {
+		if err := term.SetWinsize(pty.Fd(), &term.Winsize{Height: req.Height, Width: req.Width}); err != nil {
 			return err
 		}
 		if req.Attached != nil {
 			req.Attached <- struct{}{}
-			<-req.Attached
 		}
-		if stdin && stdout {
-			go io.Copy(pty, req)
-		} else if stdin {
-			io.Copy(pty, req)
+		if req.Stdin != nil && req.Stdout != nil {
+			go io.Copy(pty, req.Stdin)
+		} else if req.Stdin != nil {
+			io.Copy(pty, req.Stdin)
 		}
-		if stdout {
-			io.Copy(req, pty)
+		if req.Stdout != nil {
+			io.Copy(req.Stdout, pty)
 		}
 		pty.Close()
-		return nil
+		return io.EOF
 	}
-	if stdin {
+	if req.Stdin != nil {
 		stdinPipe, err := client.GetStdin()
 		if err != nil {
 			return err
 		}
 		go func() {
-			io.Copy(stdinPipe, req)
+			io.Copy(stdinPipe, req.Stdin)
 			stdinPipe.Close()
 		}()
 	}
@@ -621,32 +652,28 @@ func (l *LibvirtLXCBackend) Attach(req *AttachRequest) error {
 
 	if req.Attached != nil {
 		req.Attached <- struct{}{}
-		<-req.Attached
 	}
 
-	var header [8]byte
 	for {
-		line, err := r.ReadLine(req.Stream)
+		data, err := r.ReadData(req.Stream)
 		if err != nil {
-			if err == io.EOF {
-				err = nil
+			return err
+		}
+		switch data.Stream {
+		case 1:
+			if req.Stdout == nil {
+				continue
 			}
-			return err
-		}
-		if !stdout && line.Stream == 1 || !stderr && line.Stream == 2 {
-			continue
-		}
-		// TODO: get rid of docker framing
-		header[0] = byte(line.Stream)
-		binary.BigEndian.PutUint32(header[4:], uint32(len(line.Message)+1))
-		if _, err := req.Write(header[:]); err != nil {
-			return err
-		}
-		if _, err := req.Write([]byte(line.Message)); err != nil {
-			return err
-		}
-		if _, err := req.Write([]byte{'\n'}); err != nil {
-			return err
+			if _, err := req.Stdout.Write([]byte(data.Message)); err != nil {
+				return err
+			}
+		case 2:
+			if req.Stderr == nil {
+				continue
+			}
+			if _, err := req.Stderr.Write([]byte(data.Message)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

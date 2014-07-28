@@ -124,7 +124,7 @@ type ActiveJob struct {
 	Status      JobStatus
 	StartedAt   time.Time
 	EndedAt     time.Time
-	ExitCode    int
+	ExitStatus  int
 	Error       *string
 	ManifestID  string
 }
@@ -132,8 +132,8 @@ type ActiveJob struct {
 type AttachReq struct {
 	JobID  string
 	Flags  AttachFlag
-	Height int
-	Width  int
+	Height uint16
+	Width  uint16
 }
 
 type AttachFlag uint8
@@ -170,4 +170,8 @@ const (
 	AttachSuccess byte = iota
 	AttachWaiting
 	AttachError
+	AttachData
+	AttachSignal
+	AttachExit
+	AttachResize
 )

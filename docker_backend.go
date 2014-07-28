@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/flynn/flynn-host/ports"
 	"github.com/flynn/flynn-host/types"
@@ -16,6 +15,7 @@ import (
 	"github.com/technoweenie/grohl"
 )
 
+/*
 func NewDockerBackend(state *State, bindAddr string) (Backend, error) {
 	dockerc, err := docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
@@ -30,6 +30,7 @@ func NewDockerBackend(state *State, bindAddr string) (Backend, error) {
 	go d.handleEvents()
 	return d, nil
 }
+*/
 
 type DockerBackend struct {
 	docker dockerClient
@@ -141,6 +142,7 @@ func (d *DockerBackend) RestoreState(jobs map[string]*host.ActiveJob, dec *json.
 	return nil
 }
 
+/*
 func (d *DockerBackend) Attach(req *AttachRequest) error {
 	opts := docker.AttachToContainerOptions{
 		Container:    req.Job.ContainerID,
@@ -198,6 +200,7 @@ func (d *DockerBackend) Attach(req *AttachRequest) error {
 
 	return d.docker.AttachToContainer(opts)
 }
+*/
 
 func (d *DockerBackend) handleEvents() {
 	stream, err := d.docker.Events()

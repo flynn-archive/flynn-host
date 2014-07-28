@@ -36,10 +36,9 @@ import (
 	sigutil "github.com/dotcloud/docker/pkg/signal"
 	"github.com/dotcloud/docker/pkg/user"
 	"github.com/flynn/rpcplus"
-	"github.com/j-keck/arping"
+	"github.com/flynn/rpcplus/fdrpc"
 	"github.com/kr/pty"
 	"github.com/syndtr/gocapability/capability"
-	"github.com/titanous/fdrpc"
 )
 
 type ContainerInitArgs struct {
@@ -332,19 +331,6 @@ func setupNetworking(args *ContainerInitArgs) error {
 		}
 		if err := netlink.NetworkLinkUp(iface); err != nil {
 			return fmt.Errorf("Unable to set up networking: %v", err)
-		}
-		if args.gateway != "" {
-			// TODO: figure out why we need to do this
-			// For the first few seconds, ARP packets don't make it out of the
-			// veth onto the bridge, resulting in "no route to host" errors. Our
-			// workaround is to ARP the gateway until we receive a response.
-			arping.SetTimeout(5 * time.Millisecond)
-			for i := 0; i < 2000; i++ {
-				_, _, err := arping.PingOverIface(net.ParseIP(args.gateway), *iface)
-				if err == nil {
-					break
-				}
-			}
 		}
 	}
 

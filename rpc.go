@@ -52,7 +52,7 @@ func (h *Host) StopJob(id string, res *struct{}) error {
 	if job.Status != host.StatusRunning {
 		return errors.New("host: job is not running")
 	}
-	return h.backend.Stop(job.ContainerID)
+	return h.backend.Stop(id)
 }
 
 func (h *Host) StreamEvents(id string, stream rpcplus.Stream) error {

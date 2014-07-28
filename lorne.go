@@ -24,7 +24,7 @@ import (
 // Attempts is the attempt strategy that is used to connect to discoverd.
 var Attempts = attempt.Strategy{
 	Min:   5,
-	Total: 5 * time.Second,
+	Total: 10 * time.Second,
 	Delay: 200 * time.Millisecond,
 }
 
@@ -46,6 +46,10 @@ func (a MetaFlag) String() string {
 	return strings.Join(res, ", ")
 }
 
+func init() {
+	log.SetFlags(log.Lshortfile | log.Lmicroseconds)
+}
+
 func main() {
 	hostname, _ := os.Hostname()
 	externalAddr := flag.String("external", "", "external IP of host")
@@ -53,7 +57,7 @@ func main() {
 	configFile := flag.String("config", "", "configuration file")
 	manifestFile := flag.String("manifest", "/etc/flynn-host.json", "manifest file")
 	stateFile := flag.String("state", "", "state file")
-	hostID := flag.String("id", hostname, "host id")
+	hostID := flag.String("id", strings.Replace(hostname, "-", "", -1), "host id")
 	force := flag.Bool("force", false, "kill all containers booted by flynn-host before starting")
 	volPath := flag.String("volpath", "/var/lib/flynn-host", "directory to create volumes in")
 	metadata := make(MetaFlag)
@@ -63,9 +67,13 @@ func main() {
 	grohl.Log(grohl.Data{"at": "start"})
 	g := grohl.NewContext(grohl.Data{"fn": "main"})
 
+	if strings.Contains(*hostID, "-") {
+		log.Fatal("host id must not contain dashes")
+	}
+
 	sh := newShutdownHandler()
 	state := NewState()
-	backend, err := NewLibvirtLXCBackend(state, *volPath, "/tmp/flynn-host-logs", "/vagrant/src/flynn-host/flynn-init/flynn-init")
+	backend, err := NewLibvirtLXCBackend(state, *volPath, "/tmp/flynn-host-logs", "/usr/bin/flynn-init")
 	if err != nil {
 		log.Fatal(err)
 	}

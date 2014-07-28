@@ -29,7 +29,7 @@ func (s *S) TestLogWriteRead(c *C) {
 	defer l.Close()
 	r := l.NewReader()
 	defer r.Close()
-	_, err := r.ReadLine(false)
+	_, err := r.ReadData(false)
 	c.Assert(err, Equals, io.EOF)
 
 	readFrom := func(stream int, r io.Reader) {
@@ -43,20 +43,20 @@ func (s *S) TestLogWriteRead(c *C) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		stdoutW.Write([]byte("1\n"))
-		stdoutW.Write([]byte("2\n"))
+		stdoutW.Write([]byte("1"))
+		stdoutW.Write([]byte("2"))
 		wg.Done()
 	}()
 	go func() {
-		stderrW.Write([]byte("3\n"))
-		stderrW.Write([]byte("4\n"))
+		stderrW.Write([]byte("3"))
+		stderrW.Write([]byte("4"))
 		wg.Done()
 	}()
 	wg.Wait()
 
 	stdout, stderr := 0, 2
 	for i := 0; i < 4; i++ {
-		line, err := r.ReadLine(false)
+		line, err := r.ReadData(false)
 		c.Assert(err, IsNil)
 		c.Assert(line.Timestamp.After(time.Now().Add(-time.Minute)), Equals, true)
 		switch line.Stream {
@@ -70,18 +70,18 @@ func (s *S) TestLogWriteRead(c *C) {
 			c.Errorf("unknown stream: %#v", line)
 		}
 	}
-	_, err = r.ReadLine(false)
+	_, err = r.ReadData(false)
 	c.Assert(err, Equals, io.EOF)
 
 	err = l.l.Rotate()
 	c.Assert(err, IsNil)
 
-	stdoutW.Write([]byte("5\n"))
-	line, err := r.ReadLine(false)
+	stdoutW.Write([]byte("5"))
+	line, err := r.ReadData(false)
 	c.Assert(err, IsNil)
 	c.Assert(line.Message, Equals, "5")
 
-	_, err = r.ReadLine(false)
+	_, err = r.ReadData(false)
 	c.Assert(err, Equals, io.EOF)
 }
 
@@ -92,15 +92,15 @@ func (s *S) TestClosedRead(c *C) {
 	defer l.Close()
 	go l.ReadFrom(0, pipeR)
 
-	pipeW.Write([]byte("1\n"))
+	pipeW.Write([]byte("1"))
 
 	r := l.NewReader()
 	defer r.Close()
-	line, err := r.ReadLine(false)
+	line, err := r.ReadData(false)
 	c.Assert(err, IsNil)
 	c.Assert(line.Message, Equals, "1")
 
-	_, err = r.ReadLine(false)
+	_, err = r.ReadData(false)
 	c.Assert(err, Equals, io.EOF)
 }
 
@@ -112,35 +112,35 @@ func (s *S) TestBlockingRead(c *C) {
 	ch := make(chan struct{})
 	r := l.NewReader()
 	defer r.Close()
-	var line *Line
-	readLine := func() {
+	var data *Data
+	readData := func() {
 		var err error
-		line, err = r.ReadLine(true)
+		data, err = r.ReadData(true)
 		c.Assert(err, IsNil)
 		ch <- struct{}{}
 	}
-	waitLine := func() {
+	waitData := func() {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
-			c.Error("timed out waiting for readline")
+			c.Error("timed out waiting for readData")
 		}
 	}
 
 	for i := 0; i < 3; i++ {
-		go readLine()
+		go readData()
 		s := strconv.Itoa(i)
-		pipeW.Write([]byte(s + "\n"))
-		waitLine()
-		c.Assert(line, Not(IsNil))
-		c.Assert(line.Message, Equals, s)
+		pipeW.Write([]byte(s))
+		waitData()
+		c.Assert(data, Not(IsNil))
+		c.Assert(data.Message, Equals, s)
 		if i == 1 {
 			l.l.Rotate()
 		}
 	}
 
 	go func() {
-		_, err := r.ReadLine(true)
+		_, err := r.ReadData(true)
 		c.Assert(err, Equals, io.EOF)
 		ch <- struct{}{}
 	}()
@@ -161,22 +161,22 @@ func (s *S) TestSeekToEnd(c *C) {
 	err := r.SeekToEnd()
 	c.Assert(err, IsNil)
 
-	line, err := r.ReadLine(false)
+	data, err := r.ReadData(false)
 	c.Assert(err, Equals, io.EOF)
 
 	go func() {
 		runtime.Gosched()
-		l.ReadFrom(0, strings.NewReader("1\n"))
+		l.ReadFrom(0, strings.NewReader("1"))
 	}()
-	line, err = r.ReadLine(true)
+	data, err = r.ReadData(true)
 	c.Assert(err, IsNil)
-	c.Assert(line.Message, Equals, "1")
+	c.Assert(data.Message, Equals, "1")
 
-	l.ReadFrom(0, strings.NewReader("2\n"))
+	l.ReadFrom(0, strings.NewReader("2"))
 	err = r.SeekToEnd()
 	c.Assert(err, IsNil)
-	go l.ReadFrom(0, strings.NewReader("3\n"))
-	line, err = r.ReadLine(true)
+	go l.ReadFrom(0, strings.NewReader("3"))
+	data, err = r.ReadData(true)
 	c.Assert(err, IsNil)
-	c.Assert(line.Message, Equals, "3")
+	c.Assert(data.Message, Equals, "3")
 }

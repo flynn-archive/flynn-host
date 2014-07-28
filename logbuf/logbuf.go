@@ -1,7 +1,6 @@
 package logbuf
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,7 +39,7 @@ type Log struct {
 	files    map[string]*file
 }
 
-type Line struct {
+type Data struct {
 	Stream    int      `json:"s"`
 	Timestamp UnixTime `json:"t"`
 	Message   string   `json:"m"`
@@ -61,23 +60,31 @@ func (t *UnixTime) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (l *Log) ReadFrom(stream int, r io.Reader) (err error) {
+func (l *Log) ReadFrom(stream int, r io.Reader) error {
 	j := json.NewEncoder(l.l)
-	s := bufio.NewScanner(r)
-	line := &Line{Stream: stream}
+	data := &Data{Stream: stream}
 
-	for s.Scan() {
-		line.Timestamp = UnixTime{time.Now()}
-		line.Message = s.Text()
-		if err = j.Encode(line); err != nil {
-			return
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			data.Timestamp = UnixTime{time.Now()}
+			data.Message = string(buf[:n])
+			if err := j.Encode(data); err != nil {
+				return err
+			}
+			l.mtx.Lock()
+			l.name, l.size = l.l.File()
+			l.changed.Broadcast()
+			l.mtx.Unlock()
 		}
-		l.mtx.Lock()
-		l.name, l.size = l.l.File()
-		l.changed.Broadcast()
-		l.mtx.Unlock()
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return err
+		}
 	}
-	return s.Err()
 }
 
 func (l *Log) Close() error {
@@ -182,7 +189,7 @@ func (r *Reader) SeekToEnd() error {
 	return err
 }
 
-func (r *Reader) ReadLine(blocking bool) (*Line, error) {
+func (r *Reader) ReadData(blocking bool) (*Data, error) {
 	if r.f == nil {
 		if err := r.openNextFile(); err != nil {
 			if blocking && err == io.EOF {
@@ -190,14 +197,14 @@ func (r *Reader) ReadLine(blocking bool) (*Line, error) {
 				r.l.mtx.RLock()
 				r.l.changed.Wait()
 				r.l.mtx.RUnlock()
-				return r.ReadLine(blocking)
+				return r.ReadData(blocking)
 			}
 			return nil, err
 		}
 	}
-	line := &Line{}
-	if err := r.d.Decode(line); err == nil {
-		return line, nil
+	data := &Data{}
+	if err := r.d.Decode(data); err == nil {
+		return data, nil
 	} else if err != io.EOF {
 		return nil, err
 	}
@@ -212,7 +219,7 @@ func (r *Reader) ReadLine(blocking bool) (*Line, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	return r.ReadLine(blocking)
+	return r.ReadData(blocking)
 }
 
 var errLastFile = errors.New("current file is the most recent")

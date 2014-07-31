@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flynn/flynn-host/ports"
 	"github.com/flynn/flynn-host/sampi"
 	"github.com/flynn/flynn-host/types"
 	"github.com/flynn/go-discoverd"
@@ -60,6 +61,7 @@ func main() {
 	hostID := flag.String("id", strings.Replace(hostname, "-", "", -1), "host id")
 	force := flag.Bool("force", false, "kill all containers booted by flynn-host before starting")
 	volPath := flag.String("volpath", "/var/lib/flynn-host", "directory to create volumes in")
+	backendName := flag.String("backend", "libvirt-lxc", "runner backend (docker or libvirt-lxc)")
 	metadata := make(MetaFlag)
 	flag.Var(&metadata, "meta", "key=value pair to add as metadata")
 	flag.Parse()
@@ -71,9 +73,24 @@ func main() {
 		log.Fatal("host id must not contain dashes")
 	}
 
+	portAlloc := map[string]*ports.Allocator{
+		"tcp": ports.NewAllocator(55000, 65535),
+		"udp": ports.NewAllocator(55000, 65535),
+	}
+
 	sh := newShutdownHandler()
 	state := NewState()
-	backend, err := NewLibvirtLXCBackend(state, *volPath, "/tmp/flynn-host-logs", "/usr/bin/flynn-init")
+	var backend Backend
+	var err error
+
+	switch *backendName {
+	case "libvirt-lxc":
+		backend, err = NewLibvirtLXCBackend(state, portAlloc, *volPath, "/tmp/flynn-host-logs", "/usr/bin/flynn-init")
+	case "docker":
+		backend, err = NewDockerBackend(state, portAlloc, *bindAddr)
+	default:
+		log.Fatalf("unknown backend %q", *backendName)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -103,6 +120,7 @@ func main() {
 		bindAddr:     *bindAddr,
 		backend:      backend,
 		state:        state,
+		ports:        portAlloc,
 	}
 
 	discAddr := os.Getenv("DISCOVERD")

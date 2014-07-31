@@ -1,3 +1,5 @@
+// +build !dockeronly
+
 package main
 
 import (
@@ -17,8 +19,8 @@ import (
 	"time"
 
 	"github.com/alexzorin/libvirt-go"
-	"github.com/dotcloud/docker/daemon/networkdriver/ipallocator"
-	"github.com/dotcloud/docker/pkg/term"
+	"github.com/docker/docker/daemon/networkdriver/ipallocator"
+	"github.com/docker/docker/pkg/term"
 	"github.com/flynn/flynn-host/containerinit"
 	lt "github.com/flynn/flynn-host/libvirt"
 	"github.com/flynn/flynn-host/logbuf"
@@ -31,7 +33,7 @@ import (
 	"github.com/technoweenie/grohl"
 )
 
-func NewLibvirtLXCBackend(state *State, volPath, logPath, initPath string) (Backend, error) {
+func NewLibvirtLXCBackend(state *State, portAlloc map[string]*ports.Allocator, volPath, logPath, initPath string) (Backend, error) {
 	libvirtc, err := libvirt.NewVirConnection("lxc:///")
 	if err != nil {
 		return nil, err
@@ -50,15 +52,12 @@ func NewLibvirtLXCBackend(state *State, volPath, logPath, initPath string) (Back
 	}
 
 	return &LibvirtLXCBackend{
-		LogPath:  logPath,
-		VolPath:  volPath,
-		InitPath: initPath,
-		libvirt:  libvirtc,
-		state:    state,
-		ports: map[string]*ports.Allocator{
-			"tcp": ports.NewAllocator(55000, 65535),
-			"udp": ports.NewAllocator(55000, 65535),
-		},
+		LogPath:    logPath,
+		VolPath:    volPath,
+		InitPath:   initPath,
+		libvirt:    libvirtc,
+		state:      state,
+		ports:      portAlloc,
 		forwarder:  ports.NewForwarder(net.ParseIP("0.0.0.0"), chain),
 		logs:       make(map[string]*logbuf.Log),
 		containers: make(map[string]*libvirtContainer),
@@ -160,7 +159,7 @@ func readDockerImageConfig(id string) (*dockerImageConfig, error) {
 
 func (l *LibvirtLXCBackend) Run(job *host.Job) (err error) {
 	g := grohl.NewContext(grohl.Data{"backend": "libvirt-lxc", "fn": "run", "job.id": job.ID})
-	g.Log(grohl.Data{"at": "start", "job.artifact.url": job.Artifact.URI, "job.cmd": job.Config.Cmd})
+	g.Log(grohl.Data{"at": "start", "job.artifact.uri": job.Artifact.URI, "job.cmd": job.Config.Cmd})
 
 	ip, err := ipallocator.RequestIP(defaultNet, nil)
 	if err != nil {
@@ -356,7 +355,6 @@ func (l *LibvirtLXCBackend) Run(job *host.Job) (err error) {
 	}
 
 	g.Log(grohl.Data{"at": "define_domain"})
-	fmt.Println(string(domain.XML()))
 	vd, err := l.libvirt.DomainDefineXML(string(domain.XML()))
 	if err != nil {
 		g.Log(grohl.Data{"at": "define_domain", "status": "error", "err": err})

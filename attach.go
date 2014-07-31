@@ -105,6 +105,7 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 			g.Log(grohl.Data{"at": "success"})
 			conn.Write([]byte{host.AttachSuccess})
 			writeMtx.Unlock()
+			close(attached)
 			close(success)
 		case <-failed:
 			g.Log(grohl.Data{"at": "failed"})
@@ -168,7 +169,7 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 	}()
 
 	g.Log(grohl.Data{"at": "attach"})
-	if err := h.backend.Attach(opts); err != nil {
+	if err := h.backend.Attach(opts); err != nil && err != io.EOF {
 		// TODO: send AttachExit if the job has exited
 		select {
 		case <-success:
@@ -177,14 +178,18 @@ func (h *attachHandler) attach(req *host.AttachReq, conn io.ReadWriteCloser) {
 				w.WriteByte(host.AttachExit)
 				binary.Write(w, binary.BigEndian, uint32(exit))
 				w.Flush()
+				if exit == 0 {
+					err = nil
+				}
 			}
 		default:
 			close(failed)
 			writeMtx.Lock()
 			writeError(err.Error())
 		}
-		g.Log(grohl.Data{"at": "attach", "status": "error", "err": err.Error()})
-		return
+		if err != nil {
+			g.Log(grohl.Data{"at": "attach", "status": "error", "err": err.Error()})
+		}
 	}
 	g.Log(grohl.Data{"at": "finish"})
 }

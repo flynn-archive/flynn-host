@@ -70,6 +70,7 @@ type manifestRunner struct {
 	bindAddr     string
 	backend      Backend
 	state        *State
+	ports        map[string]*ports.Allocator
 }
 
 type manifestService struct {
@@ -112,7 +113,7 @@ func (m *manifestRunner) runManifest(r io.Reader) (map[string]*ManifestData, err
 			InternalIP: job.InternalIP,
 			Env:        job.Job.Config.Env,
 			Services:   serviceData,
-			ports:      m.backend.(*LibvirtLXCBackend).ports["tcp"],
+			ports:      m.ports["tcp"],
 			readonly:   true,
 		}
 		data.TCPPorts = make([]int, 0, len(job.Job.Config.Ports))
@@ -135,7 +136,7 @@ func (m *manifestRunner) runManifest(r io.Reader) (map[string]*ManifestData, err
 			Env:        parseEnviron(),
 			Services:   serviceData,
 			ExternalIP: m.externalAddr,
-			ports:      m.backend.(*LibvirtLXCBackend).ports["tcp"],
+			ports:      m.ports["tcp"],
 		}
 
 		// Add explicit tcp ports to data.TCPPorts

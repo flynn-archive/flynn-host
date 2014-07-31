@@ -32,9 +32,9 @@ import (
 	"syscall"
 	"time"
 
+	sigutil "github.com/docker/docker/pkg/signal"
+	"github.com/docker/docker/pkg/user"
 	"github.com/docker/libcontainer/netlink"
-	sigutil "github.com/dotcloud/docker/pkg/signal"
-	"github.com/dotcloud/docker/pkg/user"
 	"github.com/flynn/rpcplus"
 	"github.com/flynn/rpcplus/fdrpc"
 	"github.com/kr/pty"

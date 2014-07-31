@@ -13,29 +13,29 @@
 			"Rev": "7745cfd7f8e619cc9e6be450238e6253a57a227f"
 		},
 		{
+			"ImportPath": "github.com/docker/docker/daemon/networkdriver",
+			"Comment": "v1.1.1-440-gac3eecf",
+			"Rev": "ac3eecf3db5f81a553b71267f2e18ca7b7d95fea"
+		},
+		{
+			"ImportPath": "github.com/docker/docker/pkg/signal",
+			"Comment": "v1.1.1-440-gac3eecf",
+			"Rev": "ac3eecf3db5f81a553b71267f2e18ca7b7d95fea"
+		},
+		{
+			"ImportPath": "github.com/docker/docker/pkg/term",
+			"Comment": "v1.1.1-440-gac3eecf",
+			"Rev": "ac3eecf3db5f81a553b71267f2e18ca7b7d95fea"
+		},
+		{
+			"ImportPath": "github.com/docker/docker/pkg/user",
+			"Comment": "v1.1.1-440-gac3eecf",
+			"Rev": "ac3eecf3db5f81a553b71267f2e18ca7b7d95fea"
+		},
+		{
 			"ImportPath": "github.com/docker/libcontainer/netlink",
-			"Comment": "v1.1.0-115-ge6a43c1",
-			"Rev": "e6a43c1c2b9f769deb96348a0a93417cd48a36d8"
-		},
-		{
-			"ImportPath": "github.com/dotcloud/docker/daemon/networkdriver",
-			"Comment": "v1.1.0-14-g02ef943",
-			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
-		},
-		{
-			"ImportPath": "github.com/dotcloud/docker/pkg/signal",
-			"Comment": "v1.1.0-14-g02ef943",
-			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
-		},
-		{
-			"ImportPath": "github.com/dotcloud/docker/pkg/term",
-			"Comment": "v1.1.0-14-g02ef943",
-			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
-		},
-		{
-			"ImportPath": "github.com/dotcloud/docker/pkg/user",
-			"Comment": "v1.1.0-14-g02ef943",
-			"Rev": "02ef9437d3b55301ded005806b1649238afdbdad"
+			"Comment": "v1.1.0-117-ge64f9a3",
+			"Rev": "e64f9a39c6361b4727d58da2f07edc4b5cb1d8de"
 		},
 		{
 			"ImportPath": "github.com/flynn/discoverd/agent",
@@ -47,15 +47,19 @@
 		},
 		{
 			"ImportPath": "github.com/flynn/go-dockerclient",
-			"Rev": "7293e94689ede4992e94fdcf1e1152b5947b526b"
+			"Rev": "70a6053bac9d85b17e279d1e9a5337bd3d7e035d"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-flynn/attempt",
-			"Rev": "59a4d6b5820cc3f962f92f4a0910f6499068e559"
+			"Rev": "0de426bf8d98544ea8203423cad7bb052d65df35"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-flynn/cluster",
-			"Rev": "59a4d6b5820cc3f962f92f4a0910f6499068e559"
+			"Rev": "0de426bf8d98544ea8203423cad7bb052d65df35"
+		},
+		{
+			"ImportPath": "github.com/flynn/go-flynn/demultiplex",
+			"Rev": "0de426bf8d98544ea8203423cad7bb052d65df35"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-iptables",
@@ -69,10 +73,6 @@
 		{
 			"ImportPath": "github.com/flynn/rpcplus",
 			"Rev": "50c419fe0d665ed5088c6aa7692454fa7784490b"
-		},
-		{
-			"ImportPath": "github.com/j-keck/arping",
-			"Rev": "7aa611681473b9c5af382b96b6aa1df0b89f5c97"
 		},
 		{
 			"ImportPath": "github.com/kr/pty",

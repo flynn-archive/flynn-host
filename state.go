@@ -172,7 +172,7 @@ func (s *State) SetStatusRunning(jobID string) {
 
 func (s *State) SetContainerStatusDone(containerID string, exitCode int) {
 	s.mtx.Lock()
-	defer s.mtx.Lock()
+	defer s.mtx.Unlock()
 	job, ok := s.containers[containerID]
 	if !ok {
 		return
@@ -271,6 +271,11 @@ func (s *State) AddListener(jobID string, ch chan host.Event) {
 }
 
 func (s *State) RemoveListener(jobID string, ch chan host.Event) {
+	go func() {
+		// drain to prevent deadlock while removing the listener
+		for _ = range ch {
+		}
+	}()
 	s.listenMtx.Lock()
 	delete(s.listeners[jobID], ch)
 	if len(s.listeners[jobID]) == 0 {

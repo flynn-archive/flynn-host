@@ -59,11 +59,6 @@ func (h *Host) StreamEvents(id string, stream rpcplus.Stream) error {
 	ch := make(chan host.Event)
 	h.state.AddListener(id, ch)
 	defer func() {
-		go func() {
-			// drain to prevent deadlock while removing the listener
-			for _ = range ch {
-			}
-		}()
 		h.state.RemoveListener(id, ch)
 		close(ch)
 	}()

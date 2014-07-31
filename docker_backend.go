@@ -2,46 +2,49 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 
 	"github.com/flynn/flynn-host/ports"
 	"github.com/flynn/flynn-host/types"
 	"github.com/flynn/go-dockerclient"
+	"github.com/flynn/go-flynn/demultiplex"
 	"github.com/technoweenie/grohl"
 )
 
-/*
-func NewDockerBackend(state *State, bindAddr string) (Backend, error) {
+func NewDockerBackend(state *State, portAlloc map[string]*ports.Allocator, bindAddr string) (Backend, error) {
 	dockerc, err := docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
 		return nil, err
 	}
 	d := &DockerBackend{
 		state:    state,
-		ports:    ports.NewAllocator(55000, 65535),
+		ports:    portAlloc,
 		docker:   dockerc,
 		bindAddr: bindAddr,
 	}
 	go d.handleEvents()
 	return d, nil
 }
-*/
 
 type DockerBackend struct {
 	docker dockerClient
 	state  *State
-	ports  *ports.Allocator
+	ports  map[string]*ports.Allocator
 
 	bindAddr string
 }
 
 type dockerClient interface {
-	PullImage(docker.PullImageOptions, io.Writer) error
+	PullImage(docker.PullImageOptions) error
 	CreateContainer(*docker.Config) (*docker.Container, error)
 	StartContainer(string, *docker.HostConfig) error
 	InspectContainer(string) (*docker.Container, error)
@@ -49,16 +52,22 @@ type dockerClient interface {
 	StopContainer(string, uint) error
 	ResizeContainerTTY(string, int, int) error
 	AttachToContainer(docker.AttachToContainerOptions) error
-	KillContainer(string) error
+	KillContainer(docker.KillContainerOptions) error
 	ListContainers(docker.ListContainersOptions) ([]docker.APIContainers, error)
 }
 
 func (d *DockerBackend) Run(job *host.Job) error {
 	g := grohl.NewContext(grohl.Data{"backend": "docker", "fn": "run", "job.id": job.ID})
-	g.Log(grohl.Data{"at": "start", "job.artifact.url": job.Artifact.URI, "job.cmd": job.Config.Cmd})
+	g.Log(grohl.Data{"at": "start", "job.artifact.uri": job.Artifact.URI, "job.cmd": job.Config.Cmd})
+
+	image, pullOpts, err := parseDockerImageURI(job.Artifact.URI)
+	if err != nil {
+		g.Log(grohl.Data{"at": "parse_artifact_uri", "status": "error", "err": err})
+		return err
+	}
 
 	config := &docker.Config{
-		// Image:
+		Image:        image,
 		Entrypoint:   job.Config.Entrypoint,
 		Cmd:          job.Config.Cmd,
 		Tty:          job.Config.TTY,
@@ -66,19 +75,21 @@ func (d *DockerBackend) Run(job *host.Job) error {
 		AttachStderr: true,
 		AttachStdin:  job.Config.Stdin,
 		StdinOnce:    job.Config.Stdin,
+		OpenStdin:    job.Config.Stdin,
 		ExposedPorts: make(map[string]struct{}, len(job.Config.Ports)),
+		Env:          make([]string, 0, len(job.Config.Env)+len(job.Config.Ports)+1),
+		Volumes:      make(map[string]struct{}, len(job.Config.Mounts)),
 	}
 	hostConfig := &docker.HostConfig{
 		PortBindings: make(map[string][]docker.PortBinding, len(job.Config.Ports)),
 	}
-	config.Env = make([]string, 0, len(job.Config.Env)+len(job.Config.Ports)+1)
 	for k, v := range job.Config.Env {
 		config.Env = append(config.Env, k+"="+v)
 	}
 
 	for i, p := range job.Config.Ports {
 		if p.Port == 0 {
-			port, err := d.ports.Get()
+			port, err := d.ports[p.Proto].Get()
 			if err != nil {
 				return err
 			}
@@ -94,6 +105,21 @@ func (d *DockerBackend) Run(job *host.Job) error {
 		hostConfig.PortBindings[port+"/"+p.Proto] = []docker.PortBinding{{HostPort: port, HostIp: d.bindAddr}}
 	}
 
+	hostConfig.Binds = make([]string, 0, len(job.Config.Mounts))
+	for _, m := range job.Config.Mounts {
+		if m.Target == "" {
+			config.Volumes[m.Location] = struct{}{}
+		} else {
+			bind := fmt.Sprintf("%s:%s:", m.Target, m.Location)
+			if m.Writeable {
+				bind += "rw"
+			} else {
+				bind += "ro"
+			}
+			hostConfig.Binds = append(hostConfig.Binds, bind)
+		}
+	}
+
 	if strings.HasPrefix(job.ID, "flynn-") {
 		config.Name = job.ID
 	} else {
@@ -105,7 +131,8 @@ func (d *DockerBackend) Run(job *host.Job) error {
 	container, err := d.docker.CreateContainer(config)
 	if err == docker.ErrNoSuchImage {
 		g.Log(grohl.Data{"at": "pull_image"})
-		err = d.docker.PullImage(docker.PullImageOptions{Repository: config.Image}, os.Stdout)
+		pullOpts.OutputStream = os.Stdout
+		err = d.docker.PullImage(*pullOpts)
 		if err != nil {
 			g.Log(grohl.Data{"at": "pull_image", "status": "error", "err": err})
 			return err
@@ -134,37 +161,69 @@ func (d *DockerBackend) Run(job *host.Job) error {
 }
 
 func (d *DockerBackend) Stop(id string) error {
-	const stopTimeout = 1
+	const stopTimeout = 10
 	return d.docker.StopContainer(id, stopTimeout)
 }
 
 func (d *DockerBackend) RestoreState(jobs map[string]*host.ActiveJob, dec *json.Decoder) error {
+	for id, job := range jobs {
+		container, err := d.docker.InspectContainer(job.ContainerID)
+		if _, ok := err.(*docker.NoSuchContainer); ok {
+			delete(jobs, id)
+		} else if err != nil {
+			return err
+		}
+		if !container.State.Running {
+			delete(jobs, id)
+		}
+	}
 	return nil
 }
 
-/*
+func (d *DockerBackend) ResizeTTY(id string, height, width uint16) error {
+	job := d.state.GetJob(id)
+	if job == nil {
+		return errors.New("unknown job")
+	}
+	return d.docker.ResizeContainerTTY(job.ContainerID, int(height), int(width))
+}
+
+func (d *DockerBackend) Signal(id string, sig int) error {
+	job := d.state.GetJob(id)
+	if job == nil {
+		return errors.New("unknown job")
+	}
+	return d.docker.KillContainer(docker.KillContainerOptions{ID: job.ContainerID, Signal: sig})
+}
+
 func (d *DockerBackend) Attach(req *AttachRequest) error {
+	outR, outW := io.Pipe()
 	opts := docker.AttachToContainerOptions{
 		Container:    req.Job.ContainerID,
-		OutputStream: req.ReadWriter,
+		InputStream:  req.Stdin,
+		OutputStream: outW,
 		Logs:         req.Logs,
 		Stream:       req.Stream,
 		Success:      req.Attached,
+		Stdout:       req.Stdout != nil,
+		Stderr:       req.Stderr != nil,
+		Stdin:        req.Stdin != nil,
 	}
-	for _, s := range req.Streams {
-		switch s {
-		case "stdout":
-			opts.Stdout = true
-		case "stderr":
-			opts.Stderr = true
-		case "stdin":
-			opts.Stdin = true
-			opts.InputStream = req.ReadWriter
-		}
+	if req.Job.Job.Config.TTY {
+		go func() {
+			io.Copy(req.Stdout, outR)
+			req.Stdout.Close()
+		}()
+	} else if req.Stdout != nil || req.Stderr != nil {
+		go func() {
+			demultiplex.Copy(req.Stdout, req.Stderr, outR)
+			req.Stdout.Close()
+			req.Stderr.Close()
+		}()
 	}
 
 	if req.Job.Job.Config.TTY && opts.Stdin {
-		resize := func() { d.docker.ResizeContainerTTY(req.Job.ContainerID, req.Height, req.Width) }
+		resize := func() { d.docker.ResizeContainerTTY(req.Job.ContainerID, int(req.Height), int(req.Width)) }
 		if req.Job.Status == host.StatusRunning {
 			resize()
 		} else {
@@ -198,9 +257,35 @@ func (d *DockerBackend) Attach(req *AttachRequest) error {
 		}
 	}
 
-	return d.docker.AttachToContainer(opts)
+	err := d.docker.AttachToContainer(opts)
+	outW.Close()
+	if err != nil {
+		return err
+	}
+
+	if req.Job.Job.Config.TTY || req.Stream {
+		exited := make(chan struct{})
+		ch := make(chan host.Event)
+		d.state.AddListener(req.Job.Job.ID, ch)
+		go func() {
+			defer d.state.RemoveListener(req.Job.Job.ID, ch)
+			for e := range ch {
+				if e.Event == "stop" {
+					close(exited)
+					return
+				}
+			}
+		}()
+		job := d.state.GetJob(req.Job.Job.ID)
+		if job.Status != host.StatusDone && job.Status != host.StatusCrashed {
+			<-exited
+			job = d.state.GetJob(req.Job.Job.ID)
+		}
+		return ExitError(job.ExitStatus)
+	}
+
+	return nil
 }
-*/
 
 func (d *DockerBackend) handleEvents() {
 	stream, err := d.docker.Events()
@@ -235,7 +320,7 @@ outer:
 		for _, name := range c.Names {
 			if strings.HasPrefix(name, "/flynn-") {
 				g.Log(grohl.Data{"at": "kill", "container.id": c.ID, "container.name": name})
-				if err := d.docker.KillContainer(c.ID); err != nil {
+				if err := d.docker.KillContainer(docker.KillContainerOptions{ID: c.ID, Signal: int(syscall.SIGKILL)}); err != nil {
 					g.Log(grohl.Data{"at": "kill", "container.id": c.ID, "container.name": name, "status": "error", "err": err})
 				}
 				continue outer
@@ -257,4 +342,30 @@ outer:
 		s = append(s, v)
 	}
 	return s
+}
+
+func parseDockerImageURI(s string) (name string, opts *docker.PullImageOptions, err error) {
+	uri, err := url.Parse(s)
+	if err != nil {
+		return
+	}
+	if len(uri.Path) < 2 {
+		err = fmt.Errorf("invalid image path %s", uri.Path)
+		return
+	}
+	name = uri.Path[1:]
+	q := uri.Query()
+	tag := q.Get("id")
+	if tag == "" {
+		tag = q.Get("tag")
+	}
+	opts = &docker.PullImageOptions{
+		Repository: name,
+		Tag:        tag,
+		Registry:   uri.Host,
+	}
+	if tag != "" {
+		name += ":" + tag
+	}
+	return
 }

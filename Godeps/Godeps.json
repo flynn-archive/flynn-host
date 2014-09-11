@@ -1,5 +1,5 @@
 {
-	"ImportPath": "github.com/flynn/flynn-host",
+	"ImportPath": "github.com/flynn-archive/flynn-host",
 	"GoVersion": "go1.3",
 	"Deps": [
 		{
@@ -10,6 +10,18 @@
 		{
 			"ImportPath": "github.com/flynn/discoverd/agent",
 			"Rev": "98fbb6a0c29a087c055734e539690d8176d14517"
+		},
+		{
+			"ImportPath": "github.com/flynn/flynn-host/ports",
+			"Rev": "26d417f0a304f76f7ea706f4aa282434263b80a2"
+		},
+		{
+			"ImportPath": "github.com/flynn/flynn-host/sampi",
+			"Rev": "26d417f0a304f76f7ea706f4aa282434263b80a2"
+		},
+		{
+			"ImportPath": "github.com/flynn/flynn-host/types",
+			"Rev": "26d417f0a304f76f7ea706f4aa282434263b80a2"
 		},
 		{
 			"ImportPath": "github.com/flynn/go-discoverd",
